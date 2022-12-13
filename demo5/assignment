@@ -1,0 +1,17 @@
+1. Information criteria (1p)
+Explain in your own words:
+a) the purpose of information criteria
+b) log pointwise predictive distribution (lppd)
+c) what is the fundamental difference between DIC/AIC and WAIC?
+
+2. Posterior predictive check (2p)
+Build a Stan model that estimates the mean and standard deviation of a normal distribution. Fit the model to the data in data1.txt and do a (visual) posterior predictive check. What are your conclusions about the model suitability on this data based on the PPD? What steps would you take next?
+
+Hint: you can generate the PPD in R/Python or in the generated quantities block in Stan
+
+3. WAIC-based model selection (2p)
+Let us consider the polynomial regression models with 0 (intercept only), 1 (linear regression), 2 (quadratic), 3 (cubic) degrees. Which of these four models best describes the data in data2.txt in terms of the WAIC?
+
+Use the provided Stan models and implement the WAIC in R/Python.
+
+Hint: See p.220 for definition of WAIC and Overthinking box on p.210.
