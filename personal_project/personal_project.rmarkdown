@@ -1,0 +1,999 @@
+---
+title: "Peppi-Lotta_Saari_Personal_Project"
+format: html
+editor: visual
+---
+
+
+## Personal Project
+
+
+```{r}
+library(ggplot2)
+library(rethinking)
+library(splines)
+library(dagitty)
+library(loo)
+
+```
+
+
+## Chapter 3
+
+
+```{r}
+#All chapter 3 task use this same data
+#birth data
+birth1 <- c(1,0,0,0,1,1,0,1,0,1,0,0,1,1,0,1,1,0,0,0,1,0,0,0,1,0, 
+            0,0,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,0,1,0,0,1,1,0,1,0,0,0,0,0,0,0, 
+            1,1,0,1,0,0,1,0,0,0,1,0,0,1,1,1,1,0,1,0,1,1,1,1,1,0,0,1,0,1,1,0, 
+            1,0,1,1,1,0,1,1,1,1)
+length1<-sum(lengths(birth1))
+boys1<-length(which(birth1==1))
+girls1<-length(which(birth1==0))
+
+birth2 <- c(0,1,0,1,0,1,1,1,0,0,1,1,1,1,1,0,0,1,1,1,0,0,1,1,1,0, 
+            1,1,1,0,1,1,1,0,1,0,0,1,1,1,1,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1, 
+            1,1,1,0,1,1,0,1,1,0,1,1,1,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,1,1, 
+            0,0,0,1,1,1,0,0,0,0)
+length2<-sum(lengths(birth2))
+boys2<-length(which(birth2==1))
+girls2<-length(which(birth2==0))
+
+boys<-boys1+boys2
+```
+
+
+3H1. Using grid approximation, compute the posterior distribution for the probability of a birth being a boy. Assume a uniform prior probability. Which parameter value maximizes the posterior probability?
+
+
+```{r}
+#grid approximation of birth1 with flat prior og 0.5
+p_grid <- seq( from=0 , to=1 , length.out=1000 ) 
+prior <- rep( 0.5 , 1000 ) 
+likelihood <- dbinom( boys1 , size=length1 , prob=p_grid ) 
+posterior <- likelihood * prior 
+posterior <- posterior / sum(posterior)
+
+plot(posterior)
+
+#grid approximation of bith2 with first approximations 
+#posterior as the prior
+likelihood2 <- dbinom( boys2 , size=length2 , prob=p_grid ) 
+posterior2 <- likelihood2 * posterior
+posterior2 <- posterior2 / sum(posterior2)
+
+plot(posterior2)
+```
+
+
+3H2. Using the sample function, draw 10,000 random parameter values from the posterior distribution you calculated above. Use these samples to estimate the 50%, 89%, and 97% highest posterior density intervals.
+
+
+```{r}
+samples <- sample( p_grid , prob=posterior2 , size=1e5 , replace=TRUE )
+
+quantile( samples , 0.50 )
+quantile( samples , 0.89 )
+quantile( samples , 0.97 )
+
+
+quantile( samples , c( 0.25 , 0.75 ) )
+quantile( samples , c( 0.055 , 0.945 ) )
+quantile( samples , c( 0.015 , 0.985 ) )
+```
+
+
+3H3. Use rbinom to simulate 10,000 replicates of 200 births. You should end up with 10,000 numbers, each one a count of boys out of 200 births. Compare the distribution of predicted numbers of boys to the actual count in the data (111 boys out of 200 births). There are many good ways to visualize the simulations, but the dens command (part of the rethinking package) is probably the easiest way in this case. Does it look like the model fits the data well? That is, does the distribution of predictions include the actual observation as a central, likely outcome?
+
+
+```{r}
+simulated<-rbinom( 10000 , size=200 , prob=0.51 )
+simulated<-data.frame(simulated)
+
+# Basic density
+p <- ggplot(simulated, aes(x=simulated)) + geom_density()
+# Add mean line
+p+ geom_vline(aes(xintercept=111),
+              color="blue", linetype="dashed", size=1)
+```
+
+
+## Chapter 4
+
+4M7. Refit model m4.3 from the chapter, but omit the mean weight xbar this time. Compare the new model's posterior to that of the original model. In particular, look at the covariance among the parameters. What is different? Then compare the posterior predictions of both models.
+
+
+```{r}
+#read data and make it dataframe
+data <- read.csv(file = 'howell1.csv', header=TRUE, sep=";")
+df <- data.frame(data)
+
+#choose only adult from dataframe
+adult <- df[ df$age >= 18 , ]
+xbar <- mean(adult$weight)
+
+#original quadric approximation
+m4.3 <- quap( 
+  alist( 
+    height ~ dnorm( mu , sigma ) , 
+    mu <- a + b*( weight - xbar ) , 
+    a ~ dnorm( 178 , 20 ) , 
+    b ~ dlnorm( 0 , 1 ) , 
+    sigma ~ dunif( 0 , 50 ) 
+    ) , data=adult )
+
+
+#refitted quadric approximation
+m4.3.2 <- quap( 
+  alist( 
+    height ~ dnorm( mu , sigma ) , 
+    mu <- a + b*( weight ) , 
+    a ~ dnorm( 178 , 20 ) , 
+    b ~ dlnorm( 0 , 1 ) , 
+    sigma ~ dunif( 0 , 50 ) 
+  ) , data=adult )
+
+
+#print stats
+precis( m4.3 )
+precis( m4.3.2 )
+round( vcov ( m4.3 ) , 3 )
+round( vcov ( m4.3.2 ) , 3 )
+
+
+N=10
+# extract 20 samples from the original posterior 
+post <- extract.samples( m4.3 , n=N ) 
+# extract 20 samples from the refitted posterior 
+post_refit <- extract.samples( m4.3.2 , n=N ) 
+
+# display raw data and sample size 
+plot( adult$weight , 
+      adult$height , 
+      xlim=range(adult$weight) , 
+      ylim=range(90, 180) , 
+      col=rangi2 , 
+      xlab="weight" , 
+      ylab="height" ) 
+mtext(concat("N = ",N)) 
+
+# plot curves
+for ( i in 1:N ) 
+  #original curves
+  curve( post$a[i] + post$b[i]*(x-mean(adult$weight)) , 
+         col=col.alpha("black",0.3) , add=TRUE )
+for ( i in 1:N ) 
+  #refitted curves
+  curve( post_refit$a[i] + post_refit$b[i]*(x-mean(adult$weight)) , 
+         col=col.alpha("red",0.3) , add=TRUE )
+```
+
+
+4M8. In the chapter, we used 15 knots with the cherry blossom spline. Increase the number of knots and observe what happens to the resulting spline. Then adjust also the width of the prior on the weights---change the standard deviation of the prior and watch what happens. What do you think the combination of knot number and the prior on the weights controls?
+
+
+```{r}
+#get data from rethinking package
+data(cherry_blossoms) 
+blossoms_data <- cherry_blossoms
+
+#Original code from book####
+#initialize values 
+blossoms_data2 <- blossoms_data[complete.cases(blossoms_data$doy) , ]
+num_knots <- 15
+knot_list <- quantile (blossoms_data$year , probs=seq(0,1,length.out=num_knots)) 
+
+#basis function for cubic spline
+B <- bs(blossoms_data2$year, 
+        knots=knot_list[-c(1,num_knots)] , 
+        degree=3 , 
+        intercept=TRUE )
+
+#plot basis function (plot each column against year)
+plot( NULL , 
+      xlim=range(blossoms_data2$year) , 
+      ylim=c(0,1) , 
+      xlab="year" , 
+      ylab="basis" ) 
+for ( i in 1:ncol(B) ) lines( blossoms_data2$year , B[,i] )
+
+#quadric approximation of data
+m4.7 <- quap( 
+  alist( 
+    D ~ dnorm( mu , sigma ) , 
+    mu <- a + B %*% w , 
+    a ~ dnorm(100,10), 
+    w ~ dnorm(0,10), 
+    sigma ~ dexp(1) ), 
+  data=list( D=blossoms_data2$doy , B=B ) , 
+  start=list( w=rep( 0 , ncol(B) ) ) )
+
+# extraxt samples from posterior distribution 
+post <- extract.samples( m4.7 ) 
+
+#plot weighted  basis function 
+w <- apply( post$w , 2 , mean ) 
+plot( NULL , 
+      xlim=range(blossoms_data2$year) , 
+      ylim=c(-6,6) , 
+      xlab="year" , 
+      ylab="basis * weight" ) 
+for ( i in 1:ncol(B) ) lines( blossoms_data2$year , w[i]*B[,i] )
+
+#plot 
+mu <- link( m4.7 ) 
+mu_PI <- apply(mu,2,PI,0.97) 
+plot( blossoms_data2$year , 
+      blossoms_data2$doy , 
+      col=col.alpha(rangi2,0.3) , pch=16 ) 
+shade( mu_PI , blossoms_data2$year , col=col.alpha("black",0.5) )
+```
+
+```{r}
+#Change amount of knots (double)####
+#initialize values 
+k_num_knots <- 30
+k_knot_list <- quantile (blossoms_data$year , probs=seq(0,1,length.out=k_num_knots)) 
+
+#basis function for cubic spline
+k_B <- bs(blossoms_data2$year, 
+        knots=k_knot_list[-c(1,k_num_knots)] , 
+        degree=3 , 
+        intercept=TRUE )
+
+#plot basis function (plot each column against year)
+plot( NULL , 
+      xlim=range(blossoms_data2$year) , 
+      ylim=c(0,1) , 
+      xlab="year" , 
+      ylab="basis" ) 
+for ( i in 1:ncol(k_B) ) lines( blossoms_data2$year , k_B[,i] )
+
+#quadric approximation of data
+m4.7.k <- quap( 
+  alist( 
+    D ~ dnorm( mu , sigma ) , 
+    mu <- a + B %*% w , 
+    a ~ dnorm(100,10), 
+    w ~ dnorm(0,10), 
+    sigma ~ dexp(1) ), 
+  data=list( D=blossoms_data2$doy , B=k_B ) , 
+  start=list( w=rep( 0 , ncol(k_B) ) ) )
+
+# extraxt samples from posterior distribution 
+k_post <- extract.samples( m4.7.k ) 
+
+#plot weighted  basis function 
+w <- apply( k_post$w , 2 , mean ) 
+plot( NULL , 
+      xlim=range(blossoms_data2$year) , 
+      ylim=c(-6,6) , 
+      xlab="year" , 
+      ylab="basis * weight" ) 
+for ( i in 1:ncol(k_B) ) lines( blossoms_data2$year , w[i]*k_B[,i] )
+
+#plot 
+k_mu <- link( m4.7.k ) 
+k_mu_PI <- apply(k_mu,2,PI,0.97) 
+plot( blossoms_data2$year , 
+      blossoms_data2$doy , 
+      col=col.alpha(rangi2,0.3) , pch=16 ) 
+shade( k_mu_PI , blossoms_data2$year , col=col.alpha("black",0.5) )
+```
+
+```{r}
+#Change width and sd of prior (15 knots)####
+#initialize values and basis function for cubic spline
+#are same for this as the original 
+
+#quadric approximation of data
+m4.7.p <- quap( 
+  alist( 
+    D ~ dnorm( mu , sigma ) , 
+    mu <- a + B %*% w , 
+    a ~ dnorm(100,10), 
+    w ~ dnorm(0,100), 
+    sigma ~ dexp(1) ), 
+  data=list( D=blossoms_data2$doy , B=B ) , 
+  start=list( w=rep( 0 , ncol(B) ) ) )
+
+# extraxt samples from posterior distribution 
+p_post <- extract.samples( m4.7.p ) 
+
+#plot weighted  basis function 
+w <- apply( p_post$w , 2 , max ) 
+plot( NULL , 
+      xlim=range(blossoms_data2$year) , 
+      ylim=c(-6,6) , 
+      xlab="year" , 
+      ylab="basis * weight" ) 
+for ( i in 1:ncol(B) ) lines( blossoms_data2$year , w[i]*B[,i] )
+
+#plot 
+p_mu <- link( m4.7.p ) 
+p_mu_PI <- apply(p_mu,2,PI,0.97) 
+plot( blossoms_data2$year , 
+      blossoms_data2$doy , 
+      col=col.alpha(rangi2,0.3) , pch=16 ) 
+shade( p_mu_PI , blossoms_data2$year , col=col.alpha("black",0.5) )
+
+# Making the amount of knots bigger had significant effect 
+# The curve becomes more wiggly as is more fitted to the data.
+# Changing the prior didn't have as much of an effect
+# I suppose this is due to having enought data to make the pror 
+# less affectant.
+```
+
+
+4H1. The weights listed below were recorded in the !Kung census, but heights were not recorded for these individuals. Provide predicted heights and 89% intervals for each of these individuals. That is, fill in the table below, using model-based predictions.
+
+individual \| weight \| expected \| 89% interval
+
+\# 1 \| 46.95
+
+\# 2 \| 43.72
+
+\# 3 \| 64.78
+
+\# 4 \| 32.59
+
+\# 5 \| 54.63
+
+
+```{r}
+#read data and make it dataframe
+data <- read.csv(file = 'howell1.csv', header=TRUE, sep=";")
+df <- data.frame(data)
+
+#choose only adult from dataframe
+adult <- df[ df$age >= 18 , ]
+xbar <- mean(adult$weight)
+
+#function to get stats
+expected_vals <- function(post, weight, x_mean) {
+  mu_at_weight <- post$a + post$b * ( weight - x_mean )
+  print(mean(post$a))
+  dens( mu_at_weight , col=rangi2 , lwd=2 , xlab="mu|weight")
+  print(PI( mu_at_weight , prob=0.89 ))
+}
+
+#original quadric approximation
+m4.3 <- quap( 
+  alist( 
+    height ~ dnorm( mu , sigma ) , 
+    mu <- a + b*( weight - xbar ) , 
+    a ~ dnorm( 178 , 20 ) , 
+    b ~ dlnorm( 0 , 1 ) , 
+    sigma ~ dunif( 0 , 50 ) 
+  ) , data=adult )
+
+#get posterior
+pos <- extract.samples( m4.3 )
+
+#print stats
+expected_vals(pos, 46.95, xbar )
+expected_vals(pos, 43.72, xbar )
+expected_vals(pos, 64.78, xbar )
+expected_vals(pos, 32.59, xbar )
+expected_vals(pos, 54.63, xbar )
+
+```
+
+
+## Chapter 5
+
+5M4. In the divorce data, States with high numbers of members of the Church of Jesus Christ of Latter-day Saints (LDS) have much lower divorce rates than the regression models expected. Find a list of LDS population by State and use those numbers as a predictor variable, predicting divorce rate using marriage rate, median age at marriage, and percent LDS population (possibly standardized). You may want to consider transformations of the raw percent LDS variable
+
+
+```{r}
+# Church of Jesus Christ of Latter-day Saints data downloaded from 
+#https://worldpopulationreview.com/state-rankings/mormon-population-by-state
+LDS_data <- read.csv(file = 'LDS_data.csv', header=TRUE, sep=",")
+LDS_df <- data.frame(LDS_data)
+
+LDS_df <- LDS_df[order(LDS_df$state),]
+names(LDS_df)[names(LDS_df) == "state"] <- "Location"
+
+#marriage data from package 
+data("WaffleDivorce")
+marriage <- WaffleDivorce
+
+#merge data 
+m <- merge(LDS_df,marriage,by="Location")
+
+#standardize and set data 
+m$D <- standardize( m$Divorce ) 
+m$M <- standardize( m$Marriage ) 
+m$A <- standardize( m$MedianAgeMarriage )
+m$R <- standardize( m$mormonRate )
+
+#DAG of how rate of LDS in state affect divorce rate 
+#the rate of LDS in state directly affects marriage rate and divorce 
+#rate. 
+dagLDS <- dagitty( "dag{ A -> D; A -> M; M -> D; R->M; R->D }" ) 
+coordinates(dagLDS) <- list( x=c(A=0,D=2,M=2, R=3) , 
+                             y=c(A=0,D=1,M=0, R=0) ) 
+drawdag( dagLDS )
+
+#model
+m5M4 <- quap( 
+  alist( 
+    ## A -> D <- M
+    D ~ dnorm( mu , sigma ) , 
+    mu <- a + bM*M + bA*A + bR*R , 
+    a ~ dnorm( 0 , 0.2 ) , 
+    bM ~ dnorm( 0 , 0.5 ) ,
+    bA ~ dnorm( 0 , 0.5 ) ,
+    bR ~ dnorm( 0 , 0.5 ) ,
+    sigma ~ dexp( 1 ) ,
+    ## A -> M
+    M ~ dnorm( mu_M , sigma_M ) , 
+    mu_M <- aM + bAM*A + bRM*R , 
+    aM ~ dnorm( 0 , 0.2 ) , 
+    bAM ~ dnorm( 0 , 0.5 ) ,
+    bRM ~ dnorm( 0 , 0.5 ) ,
+    sigma_M ~ dexp( 1 ) 
+  ), 
+  data = m )
+
+plot(m5M4)
+
+#what happens when we manipulate A 
+R_seq <- seq( from=-2 , to=2 , length.out=30 ) 
+#prep data 
+sim_dat <- data.frame( R=R_seq )
+#simulate M and the D using A_seq
+s <- sim( m5M4 , data=sim_dat , vars=c("A","M","D"))
+#plot prediction 
+plot( sim_dat$R , 
+      colMeans(s$D) , 
+      ylim=c(-2,2) , 
+      type="l" , 
+      xlab="manipulated R" , 
+      ylab="counterfactual D" ) 
+shade( apply(s$D,2,PI) , sim_dat$R ) 
+mtext( "Total counterfactual effect of R on D" )
+```
+
+
+5H2. Assuming that the DAG for the divorce example is indeed M → A → D, fit a new model and use it to estimate the counterfactual effect of halving a State's marriage rate M. Use the counterfactual example from the chapter (starting on page 140) as a template.
+
+
+```{r}
+#data 
+data(WaffleDivorce)
+marriage_data <- list()
+
+#standardize data
+marriage_data$D <- standardize( WaffleDivorce$Divorce ) 
+marriage_data$M <- standardize( WaffleDivorce$Marriage ) 
+marriage_data$A <- standardize( WaffleDivorce$MedianAgeMarriage )
+
+#original model####
+dag5.1.orig <- dagitty( "dag{ A -> D; A -> M; M -> D }" ) 
+coordinates(dag5.1.orig) <- list( x=c(A=0,D=1,M=2) , y=c(A=0,D=1,M=0) ) 
+drawdag( dag5.1.orig )
+
+m5.1.orig <- quap( 
+  alist( 
+    ## A -> D <- M
+    D ~ dnorm( mu , sigma ) , 
+    mu <- a + bM*M + bA*A , 
+    a ~ dnorm( 0 , 0.2 ) , 
+    bM ~ dnorm( 0 , 0.5 ) ,
+    bA ~ dnorm( 0 , 0.5 ) ,
+    sigma ~ dexp( 1 ) ,
+    ## A -> M
+    M ~ dnorm( mu_M , sigma_M ) , 
+    mu_M <- aM + bAM*A , 
+    aM ~ dnorm( 0 , 0.2 ) , 
+    bAM ~ dnorm( 0 , 0.5 ) ,
+    sigma_M ~ dexp( 1 ) 
+    ), 
+  data = marriage_data )
+
+#what happens when we manipulate A 
+A_seq <- seq( from=-2 , to=2 , length.out=30 ) 
+#prep data 
+sim_dat <- data.frame( A=A_seq )
+#simulate M and the D using A_seq
+s <- sim( m5.1.orig , data=sim_dat , vars=c("M","D"))
+#plot prediction 
+plot( sim_dat$A , 
+      colMeans(s$D) , 
+      ylim=c(-2,2) , 
+      type="l" , 
+      xlab="manipulated A" , 
+      ylab="counterfactual D" ) 
+shade( apply(s$D,2,PI) , sim_dat$A ) 
+mtext( "Total counterfactual effect of A on D" )
+
+#fit model with DAG M → A → D ####
+dag5.1.n <- dagitty( "dag{ M -> A; A -> D; }" ) 
+coordinates(dag5.1.n) <- list( x=c(A=2,D=1,M=0) , y=c(A=0,D=1,M=0) ) 
+drawdag( dag5.1.n )
+
+m5.1.n <- quap( 
+  alist(
+    ## A -> D
+    D ~ dnorm( mu , sigma ) , 
+    mu <- a + bA*A , 
+    a ~ dnorm( 0 , 0.2 ) , 
+    bA ~ dnorm( 0 , 0.5 ) ,
+    sigma ~ dexp( 1 ) ,
+    ## M -> A
+    A ~ dnorm( mu_A , sigma_A ) , 
+    mu_A <- aA + bMA*M , 
+    aA ~ dnorm( 0 , 0.2 ) , 
+    bMA ~ dnorm( 0 , 0.5 ) ,
+    sigma_A ~ dexp( 1 ) 
+  ), data = marriage_data )
+
+#what happens when we manipulate M 
+M_seq <- seq( from=-2 , to=2 , length.out=30 ) 
+#prep data 
+sim_dat <- data.frame( M=M_seq )
+#simulate M and the D using A_seq
+s <- sim( m5.1.n , data=sim_dat , vars=c("A","D"))
+#plot prediction 
+plot( sim_dat$M , 
+      colMeans(s$D) , 
+      ylim=c(-2,2) , 
+      type="l" , 
+      xlab="manipulated M" , 
+      ylab="counterfactual D" ) 
+shade( apply(s$D,2,PI) , sim_dat$M ) 
+mtext( "Total counterfactual effect of M on D" )
+
+```
+
+
+5H3. Return to the milk energy model, m5.7. Suppose that the true causal relationship among the variables is:K M N Now compute the counterfactual effect on K of doubling M. You will need to account for both the direct and indirect paths of causation. Use the counterfactual example from the chapter (starting on page 140) as a template
+
+
+```{r}
+dag5H3 <- dagitty( "dag{ M -> N; M -> K; N -> K; }" ) 
+coordinates(dag5H3) <- list( x=c(M=0,K=1,N=2) , y=c(M=0,K=1,N=0) ) 
+drawdag( dag5H3 )
+
+#get data 
+data(milk)
+milk_data <- milk
+
+#standardize values
+milk_data$K <- standardize( milk$kcal.per.g ) 
+milk_data$N <- standardize( milk$neocortex.perc ) 
+milk_data$M <- standardize( log(milk$mass) )
+
+#make sure we have full/whole data
+milk_cc <- milk_data[ complete.cases(milk_data$K,milk_data$N,milk_data$M) , ]
+
+#model
+m5H3 <- quap( 
+  alist( 
+    # M -> K <- N
+    K ~ dnorm( mu , sigma ) , 
+    mu <- a + bN*N + bM*M , 
+    a ~ dnorm( 0 , 0.2 ) , 
+    bN ~ dnorm( 0 , 0.5 ) , 
+    bM ~ dnorm( 0 , 0.5 ) , 
+    sigma ~ dexp( 1 ),
+    ## M -> N
+    N ~ dnorm( mu_N , sigma_N ) , 
+    mu_N <- aN + bMN*M , 
+    aN ~ dnorm( 0 , 0.2 ) , 
+    bMN ~ dnorm( 0 , 0.5 ) ,
+    sigma_N ~ dexp( 1 ) ) , 
+  data=milk_cc ) 
+precis(m5H3)
+
+plot( coeftab( m5H3 ) , pars=c("bM","bN") )
+
+#what happens when we manipulate M
+K_seq <- seq( from=-2 , to=2 , length.out=30 ) 
+#prep data 
+sim_dat <- data.frame( K=K_seq )
+#simulate M and the D using A_seq
+s <- sim( m5H3 , data=sim_dat , vars=c("K","M","N"))
+#plot prediction 
+plot( sim_dat$K , 
+      colMeans(s$K) , 
+      ylim=c(-2,2) , 
+      type="l" , 
+      xlab="manipulated M" , 
+      ylab="counterfactual K" ) 
+shade( apply(s$K,2,PI) , sim_dat$K ) 
+mtext( "Total counterfactual effect of M on K" )
+```
+
+
+## Chapter 6
+
+For the problem below, assume the following DAG:
+
+
+```{r}
+dagFox <- dagitty( "dag{ area -> avgfood; avgfood -> groupsize; groupsize -> weight; avgfood->weight; }" ) 
+coordinates(dagFox) <- list( x=c(area=1,avgfood=0,groupsize=2, weight=1) , 
+                             y=c(area=0,avgfood=1,groupsize=1, weight=2) ) 
+drawdag( dagFox )
+```
+
+
+6H3. Use a model to infer the total causal influence of area on weight. Would increasing the area available to each fox make it heavier (healthier)? You might want to standardize the variables. Regardless, use prior predictive simulation to show that your model's prior predictions stay within the possible outcome range.
+
+
+```{r}
+# data
+data( foxes )
+fox_data <- foxes
+
+# standardize
+fox_data$AF <- standardize( foxes$avgfood ) 
+fox_data$GS <- standardize( foxes$groupsize ) 
+fox_data$A <- standardize( foxes$area )
+fox_data$W <- standardize( foxes$weight )
+
+# model
+m6H3 = quap(
+  alist(
+    weight ~ dnorm( mu , sigma ) ,
+    mu <- a + bA*A ,
+    a ~ dnorm( 0 , 0.2 ) ,
+    bA ~ dnorm( 0 , 0.5 ) ,
+    sigma ~ dexp( 1 )
+  ) , data=fox_data )
+
+# area's effects on weight
+precis(m6H3)
+# size of area doesn't seem to have much of an effect on 
+# weight of foxes
+```
+
+
+## Chapter 7
+
+7H4. Recall the marriage, age, and happiness collider bias example from Chapter 6. Run models m6.9 and m6.10 again (page 178). Compare these two models using WAIC (or PSIS, they will produce identical results). Which model is expected to make better predictions? Which model provides the correct causal inference about the influence of age on happiness? Can you explain why the answers to these two questions disagree?
+
+
+```{r}
+#data
+happiness <- sim_happiness(seed=1977, N_years=1000)
+happiness$mid <- happiness$married + 1
+happiness <- happiness[ happiness$age>17 , ] # only adults 
+happiness$A <- ( happiness$age - 18 ) / ( 65 - 18 )
+
+y <- happiness$happiness
+x <- happiness$A
+mid <- as.integer( happiness$mid )
+
+happiness_data_list <- list(
+  N = length(x),
+  x = x,
+  y = y,
+  mid = mid
+)
+
+#Model 1 ####
+
+#fit model to data
+happiness_model1 <- stan_model("happiness1.stan")
+happiness_fit1 <- sampling(happiness_model1, happiness_data_list)
+precis(happiness_fit1, depth=2)
+
+#WAIC
+happiness_llmatrix1 = extract_log_lik(happiness_fit1, parameter_name = "log_lik", merge_chains = TRUE)
+happiness_waic_mat1 <- waic(happiness_llmatrix1)
+print(happiness_waic_mat1)
+
+#Model 2 ####
+
+#fit model to data
+happiness_model2 <- stan_model("happiness2.stan")
+happiness_fit2 <- sampling(happiness_model2, happiness_data_list)
+precis(happiness_fit2)
+
+#WAIC
+happiness_llmatrix2 = extract_log_lik(happiness_fit2, parameter_name = "log_lik", merge_chains = TRUE)
+happiness_waic_mat2 <- waic(happiness_llmatrix2)
+print(happiness_waic_mat2)
+
+
+#Answer####
+# Seems that Model 1 makes better predictions based on WAIC. 
+# The model is conditioned on a collider (mariage/common consequence of age 
+# and happiness). This shouldn't be done
+```
+
+
+7H5. Revisit the urban fox data, data(foxes), from theprevious chapter's practice problems. Use WAIC or PSIS based model comparison on five different models, each using weight as the outcome, and containing these sets of predictor variables: (1) avgfood + groupsize + area (2) avgfood + groupsize (3) groupsize + area (4) avgfood (5) area Can you explain the relative differences in WAIC scores, using the fox DAG from the previous chapter? Be sure to pay attention to the standard error of the score differences (dSE)
+
+
+```{r}
+#data
+data( foxes ) 
+fox_data <- foxes
+fox_data$A <- standardize( foxes$area)
+fox_data$AF <- standardize( foxes$avgfood )
+fox_data$GS <- standardize( foxes$groupsize )
+fox_data$W <- standardize( foxes$weight )
+
+ar <- fox_data$A
+af <- fox_data$AF
+gs <- fox_data$GS
+w <- fox_data$W
+
+#(1) avgfood + groupsize + area ####
+#data list
+fox_data1 <- list(
+  N = length(ar),
+  ar = ar,
+  af = af,
+  gs = gs,
+  w = w
+)
+
+#fit model to data
+fox_model1 <- stan_model("fox1.stan")
+fox_fit1 <- sampling(fox_model1, fox_data1)
+precis(fox_fit1)
+
+#WAIC
+fox_llmatrix1 = extract_log_lik(fox_fit1, parameter_name = "log_lik", merge_chains = TRUE)
+fox_waic_mat1 <- waic(fox_llmatrix1)
+print(fox_waic_mat1)
+
+
+#(2) avgfood + groupsize ####
+#data list
+fox_data2 <- list(
+  N = length(ar),
+  af = af,
+  gs = gs,
+  w = w
+)
+
+#fit model to data
+fox_model2 <- stan_model("fox2.stan")
+fox_fit2 <- sampling(fox_model2, fox_data2)
+precis(fox_fit2)
+
+#WAIC
+fox_llmatrix2 = extract_log_lik(fox_fit2, parameter_name = "log_lik", merge_chains = TRUE)
+fox_waic_mat2 <- waic(fox_llmatrix2)
+print(fox_waic_mat2)
+
+#(3) groupsize + area ####
+
+#data list
+fox_data3 <- list(
+  N = length(ar),
+  ar = ar,
+  gs = gs,
+  w = w
+)
+
+#fit model to data
+fox_model3 <- stan_model("fox3.stan")
+fox_fit3 <- sampling(fox_model3, fox_data3)
+precis(fox_fit3)
+
+#WAIC
+fox_llmatrix3 = extract_log_lik(fox_fit3, parameter_name = "log_lik", merge_chains = TRUE)
+fox_waic_mat3 <- waic(fox_llmatrix3)
+print(fox_waic_mat3)
+
+#(4) avgfood ####
+
+#data list
+fox_data4 <- list(
+  N = length(ar),
+  x = af,
+  w = w
+)
+
+#fit model to data
+fox_model4 <- stan_model("fox4_5.stan")
+fox_fit4 <- sampling(fox_model4, fox_data4)
+precis(fox_fit4)
+
+#WAIC
+fox_llmatrix4 = extract_log_lik(fox_fit4, parameter_name = "log_lik", merge_chains = TRUE)
+fox_waic_mat4 <- waic(fox_llmatrix4)
+print(fox_waic_mat4)
+
+#(5) area ####
+
+#data list
+fox_data5 <- list(
+  N = length(ar),
+  x = ar,
+  w = w
+)
+
+#fit model to data
+fox_model5 <- stan_model("fox4_5.stan")
+fox_fit5 <- sampling(fox_model5, fox_data5)
+precis(fox_fit5)
+
+#WAIC
+fox_llmatrix5 = extract_log_lik(fox_fit5, parameter_name = "log_lik", merge_chains = TRUE)
+fox_waic_mat5 <- waic(fox_llmatrix5)
+print(fox_waic_mat5)
+
+# Answer ####
+#First model's WAIC: 322.8
+#Second model's WAIC: 323.4
+#Third model's WAIC: 323.6
+#Fourth model's WAIC: 333.3
+#Fifth model's WAIC: 333.4
+# It seems based on the WAICs and the DAG that area and avg food are very 
+# strongly correlates and avgfood basically includes the information on area. 
+# This claim is supported by model 4 and five which have the same WAIC.
+```
+
+
+## Chapter 9
+
+9M3. Reestimate one of the Stan models from the chapter, but at different numbers of warmup iterations. Be sure to use the same number of sampling iterations in each case. Compare the n_eff values. How much warmup is enough?
+
+
+```{r}
+#data 
+data(rugged) 
+d <- rugged 
+d$log_gdp <- log(d$rgdppc_2000) 
+dd <- d[ complete.cases(d$rgdppc_2000) , ] 
+dd$log_gdp_std <- dd$log_gdp / mean(dd$log_gdp) 
+dd$rugged_std <- dd$rugged / max(dd$rugged) 
+dd$cid <- ifelse( dd$cont_africa==1 , 1 , 2 )
+
+
+dat_slim <- list( 
+  log_gdp_std = dd$log_gdp_std, 
+  rugged_std = dd$rugged_std, 
+  cid = as.integer( dd$cid ) ) 
+str(dat_slim)
+
+# model 
+m9M3 <- stan_model("m9M3.stan")
+y <- 0
+df <- data.frame(matrix(nrow=0,ncol=2))
+colnames(df)<-c("WarmUp", "n_eff")
+for (x in 1:10) {
+  m9M3_fit <- sampling(m9M3, dat_slim, warmup = y, iter=5000, chains=2)
+  s <- as.data.frame(precis(m9M3_fit, depth=2),file=NULL,appenf=FALSE)
+  df[nrow(df) + 1,] = c(y, s["a[1]","n_eff"])
+  y <- y+500
+}
+print(df)
+```
+
+
+9H6. Modify the Metropolis algorithm code from the chapter to write your own simple MCMC estimator for globe tossing data and model from Chapter 2.
+
+
+```{r}
+#data of globe tosses 
+water = 6
+tosses = 9
+
+#prior at some sample 
+prior <- function(sample) dunif(sample, min = 0, max = 1)
+
+iterations <- 1e5 
+sample <- rep(0,iterations) 
+current <- 0.5
+for ( i in 1:iterations ) { 
+## record current sample 
+  sample[i] <- current 
+## generate proposal
+  proposal <- runif(1, min=0, max=1) 
+##probabilities 
+  #probability to stay at current
+  likelyhood_stay <- dbinom(water, tosses, current)
+  prob_stay <- likelyhood_stay * prior(current)
+  #probability to move to proposal
+  likelyhood_move <- dbinom(water, tosses, proposal)
+  prob_move <- likelyhood_move * prior(proposal)
+  #probability to accept proposal
+  accept <- prob_move/prob_stay
+  
+## move? 
+  current <- ifelse( runif(1) < accept , proposal , current ) 
+}
+#plot
+dens(sample)
+```
+
+
+## Chapter 13
+
+13H2. Return to data(Trolley) from Chapter 12. Define and fit a varying intercepts model for these data. Cluster intercepts on individual participants, as indicated by the unique values in the id variable. Include action, intention, and contact as ordinary terms. Compare the varying intercepts model and a model that ignores individuals, using both WAIC and posterior predictions. What is the impact of individual variation in these data?
+
+
+```{r}
+# I tried doing this with a stan file. 
+# It didn't work properly
+
+# data 
+#data(Trolley)
+#trolley_data <- Trolley
+
+#U <- length(unique(trolley_data$id))
+#N <- length(trolley_data$id)
+#R <- trolley_data$response
+#A <- trolley_data$action
+#I <- trolley_data$intention
+#C <- trolley_data$contact
+#id <- as.integer( trolley_data$id )
+
+#trolley_data_list <- list(
+#  U = U,
+#  N = N,
+#  R = R,
+#  A = A,
+#  I = I,
+#  C = C,
+#  id = id
+#)
+
+#trolley_model <- stan_model("trolley13.stan")
+#trolley_fit <- sampling(trolley_model, trolley_data_list)
+#precis(trolley_fit, depth = U)'
+```
+
+```{r}
+#data
+data(Trolley)
+trolley_data <- Trolley
+
+dat <- list( 
+  R = trolley_data$response, 
+  A = trolley_data$action, 
+  I = trolley_data$intention, 
+  C = trolley_data$contact ) 
+
+#fitting the model original
+m12.5 <- ulam( 
+  alist( R ~ dordlogit( phi , cutpoints ), 
+         phi <- bA*A + bC*C + BI*I , 
+         BI <- bI + bIA*A + bIC*C , 
+         c(bA,bI,bC,bIA,bIC) ~ dnorm( 0 , 0.5 ), 
+         cutpoints ~ dnorm( 0 , 1.5 ) ) , 
+  data=dat , chains=2 , cores=4 ) 
+precis( m12.5 , depth = 2)
+
+```
+
+```{r}
+dat <- list( 
+  R = trolley_data$response, 
+  A = trolley_data$action, 
+  I = trolley_data$intention, 
+  C = trolley_data$contact,
+  id = coerce_index(trolley_data$id)
+  )
+
+#fitting the model where we take into account the
+#individuals
+m12.5.i <- ulam( 
+  alist( 
+   R ~ dordlogit( phi , cutpoints ), 
+   phi <- a[id] + bA*A + bC*C + BI*I ,
+   a[id] ~ normal (0, sigma ),
+   sigma ~ exponential(1),
+   BI <- bI + bIA*A + bIC*C , 
+   c(bA,bI,bC,bIA,bIC) ~ dnorm( 0 , 0.5 ), 
+   cutpoints ~ dnorm( 0 , 1.5 ) ) , 
+  data=dat , chains=2 , cores=4 ) 
+precis( m12.5.i, depth = 2 )
+```
+
+```{r}
+compare(m12.5, m12.5.i )
+#It seems that this did have an effect. 
+# there is variation between the  indivituals´.
+```
+
